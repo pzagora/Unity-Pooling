@@ -1,0 +1,16 @@
+{
+  "name": "com.zagoradev.unity.pooling",
+  "displayName": "Unity Pooling (zagora.dev)",
+  "version": "1.0.0",
+  "unity": "6000.0",
+  "description": "Unity object pooling.",
+  "keywords": [
+    "object",
+    "pooling",
+    "zagora.dev"
+  ],
+  "dependencies": {
+    "com.zagoradev.unity.commons": "https://github.com/pzagora/Unity-Commons.git",
+    "com.zagoradev.di": "https://github.com/pzagora/Dependency-Injection.git"
+  }
+}
