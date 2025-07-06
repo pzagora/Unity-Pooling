@@ -1,15 +1,14 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Commons.Constants;
-using DependencyInjection.Attributes;
 using DependencyInjection.Extensions;
 using UnityEngine;
 using UnityEngine.Pool;
 using Commons.Enums;
 using Commons.Extensions;
-using Commons.Services;
 using Object = UnityEngine.Object;
 
 namespace Pooling
@@ -21,12 +20,6 @@ namespace Pooling
     /// <typeparam name="T">A <see cref="MonoBehaviour"/> to perform pooling on.</typeparam>
     public class GenericObjectPool<T> : IDisposable where T : Object
     {
-        #region DI
-
-        [Inject] private readonly ICoroutineService _coroutineService;
-
-        #endregion
-        
         #region FIELDS
 
         private readonly T _prefab;
@@ -42,6 +35,8 @@ namespace Pooling
         private ObjectPool<T> _pool;
         private Guid _disposalCoroutineId = Guid.Empty;
         private int _currentTimeToLive;
+        
+        private CancellationTokenSource _disposalCts;
 
         #endregion
         
@@ -277,7 +272,10 @@ namespace Pooling
 
         private void UpdateHierarchyName()
         {
-            _parentObject.name = _disposalCoroutineId == Guid.Empty
+            if (_parentObject == null)
+                return;
+            
+            _parentObject.name = _disposalCts.IsNull()
                 ? string.Format(Msg.OBJECT_POOL_COUNT_NAME, _parentObjectName, ActiveCount, Count) 
                 : string.Format(Msg.OBJECT_POOL_DISPOSE_NAME, _parentObjectName, ActiveCount, Count, CurrentTimeToLive);
         }
@@ -286,32 +284,45 @@ namespace Pooling
         
         #region DISPOSAL
         
-        protected virtual void DelayedDispose()
+        protected virtual async void DelayedDispose()
         {
             if (KeepAliveIndefinitely || ActiveCount.NotZero() || Count.IsZero())
             {
-                _coroutineService.StopCoroutine(ref _disposalCoroutineId);
+                _disposalCts?.Cancel();
+                _disposalCts = null;
                 return;
             }
 
-            if (_disposalCoroutineId != Guid.Empty)
-                return;
-            
-            _disposalCoroutineId = _coroutineService.StartCoroutine(DisposalRoutine());
-        }
+            if (_disposalCts != null) return;
 
-        protected virtual IEnumerator DisposalRoutine()
-        {
+            _disposalCts = new CancellationTokenSource();
+            var token = _disposalCts.Token;
+
             CurrentTimeToLive = _timeToLive;
-            while(CurrentTimeToLive > NumericExtensions.Zero)
+            try
             {
-                yield return new WaitForSecondsRealtime(DISPOSAL_TICK);
-                
-                CurrentTimeToLive--;
-                UpdateHierarchyName();
+                while (CurrentTimeToLive > 0)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(DISPOSAL_TICK), token);
+
+                    if (token.IsCancellationRequested) 
+                        return;
+
+                    CurrentTimeToLive--;
+                    UpdateHierarchyName();
+                }
+
+                Dispose();
             }
-            
-            Dispose();
+            catch (TaskCanceledException)
+            {
+                // No action needed, just stop the disposal
+            }
+            finally
+            {
+                _disposalCts?.Dispose();
+                _disposalCts = null;
+            }
         }
 
         public void Dispose() => Pool.Dispose();
